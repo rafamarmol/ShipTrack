@@ -1,0 +1,427 @@
+{% set active_page = 'scan' %}
+{% extends "base.html" %}
+{% block title %}Scan Boxes - ShipTrack{% endblock %}
+
+{% block content %}
+<h1>Scan Shipments</h1>
+<p class="subtitle">Scan barcode labels to log outgoing boxes</p>
+
+<div class="stats-row" id="stats-row">
+    <div class="stat-card">
+        <div class="number" id="stat-today-boxes">-</div>
+        <div class="label">Boxes Today</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="stat-today-orders">-</div>
+        <div class="label">Orders Today</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="stat-total-boxes">-</div>
+        <div class="label">Total Boxes</div>
+    </div>
+    <div class="stat-card">
+        <div class="number" id="stat-total-orders">-</div>
+        <div class="label">Total Orders</div>
+    </div>
+</div>
+
+<!-- Order info banner (shows when order is recognized) -->
+<div class="card" id="order-info-banner" style="display:none; border-left:4px solid var(--green);">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+            <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin-bottom:2px;">Order Recognized</div>
+            <div style="font-size:20px;font-weight:700;" id="banner-order-number"></div>
+        </div>
+        <div style="text-align:right;">
+            <div style="font-size:15px;font-weight:600;" id="banner-customer"></div>
+            <div style="font-size:13px;color:var(--gray-500);" id="banner-po"></div>
+        </div>
+    </div>
+    <div id="banner-details" style="margin-top:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:13px;color:var(--gray-600);">
+    </div>
+</div>
+
+<div class="card">
+    <h2>Barcode Scanner</h2>
+    <div id="alert-box" class="alert"></div>
+
+    <div class="form-group">
+        <label for="barcode-input">Scan or Type Barcode</label>
+        <div class="scan-input-wrapper">
+            <input type="text" id="barcode-input" placeholder="Scan barcode here... (e.g. 20316A1)" autofocus autocomplete="off">
+        </div>
+    </div>
+
+    <!-- Manual fallback fields (hidden when order is recognized) -->
+    <div id="manual-fields" style="display:none; margin-top:12px; padding:12px; background:var(--gray-50); border-radius:8px;">
+        <div style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">Manual entry (order not in system)</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="group-letter">Group Letter</label>
+                <input type="text" id="group-letter" placeholder="A" maxlength="2" style="text-transform:uppercase">
+            </div>
+            <div class="form-group">
+                <label for="box-number">Box #</label>
+                <input type="number" id="box-number" placeholder="1" min="1">
+            </div>
+            <div class="form-group">
+                <label for="customer-name-input">Customer</label>
+                <input type="text" id="customer-name-input" placeholder="Customer name">
+            </div>
+            <div class="form-group">
+                <label for="po-number">PO Number</label>
+                <input type="text" id="po-number" placeholder="926-4206">
+            </div>
+        </div>
+    </div>
+
+    <div class="form-row" style="margin-top:12px;">
+        <div class="form-group">
+            <label for="scanned-by">Scanned By</label>
+            <input type="text" id="scanned-by" placeholder="Your name">
+        </div>
+    </div>
+
+    <button class="btn-primary" onclick="submitScan()" style="width:100%">Log Scan</button>
+</div>
+
+<!-- Order progress with visual group/box grid -->
+<div class="card" id="order-progress-card" style="display:none">
+    <h2>Order Progress</h2>
+    <div id="order-progress-content"></div>
+</div>
+
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+        <h2 style="margin-bottom:0">Recent Scans (Today)</h2>
+        <span id="recent-count" class="badge badge-blue">0</span>
+    </div>
+    <div class="recent-scans" id="recent-scans">
+        <div class="empty-state" id="empty-state">
+            <div class="icon">&#128230;</div>
+            <p>No boxes scanned today. Start scanning!</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+    .group-grid { display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; }
+    .group-card { background:var(--gray-50); border:1px solid var(--gray-200); border-radius:8px; padding:12px; min-width:140px; flex:1; }
+    .group-card.complete { border-color:var(--green); background:#f0fdf4; }
+    .group-card h4 { font-size:13px; margin-bottom:8px; display:flex; justify-content:space-between; align-items:center; }
+    .box-grid { display:flex; gap:4px; flex-wrap:wrap; }
+    .box-cell { width:28px; height:28px; border-radius:4px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; border:1px solid var(--gray-300); background:white; color:var(--gray-400); }
+    .box-cell.scanned { background:var(--green); color:white; border-color:var(--green); }
+    .box-cell.just-scanned { background:var(--blue); color:white; border-color:var(--blue); animation: pop 0.3s ease; }
+    @keyframes pop { 0%{transform:scale(1)} 50%{transform:scale(1.3)} 100%{transform:scale(1)} }
+</style>
+<script>
+var barcodeInput = document.getElementById('barcode-input');
+var alertBox = document.getElementById('alert-box');
+var currentOrderData = null; // Cached order lookup data
+var lastLookupOrder = null;
+
+// Load saved scanner name
+var savedName = localStorage.getItem('shiptrack_scanner_name');
+if (savedName) document.getElementById('scanned-by').value = savedName;
+
+document.getElementById('scanned-by').addEventListener('change', function() {
+    localStorage.setItem('shiptrack_scanner_name', this.value);
+});
+
+function showAlert(type, message) {
+    alertBox.className = 'alert alert-' + type;
+    alertBox.textContent = message;
+    alertBox.style.display = 'block';
+    if (type === 'success') {
+        setTimeout(function() { alertBox.style.display = 'none'; }, 4000);
+    }
+}
+
+// Extract order number from a barcode string (digits before the first letter)
+function extractOrderNumber(barcode) {
+    var m = barcode.match(/^(\d+)/);
+    return m ? m[1] : null;
+}
+
+// Auto-lookup when barcode field changes
+var lookupTimer = null;
+barcodeInput.addEventListener('input', function() {
+    var val = this.value.trim();
+    var orderNum = extractOrderNumber(val);
+
+    if (orderNum && orderNum.length >= 4 && orderNum !== lastLookupOrder) {
+        clearTimeout(lookupTimer);
+        lookupTimer = setTimeout(function() { lookupOrder(orderNum); }, 300);
+    }
+});
+
+function lookupOrder(orderNumber) {
+    lastLookupOrder = orderNumber;
+    fetch('/api/orders/' + orderNumber)
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.found) {
+            currentOrderData = data;
+            showOrderBanner(data);
+            showOrderProgress(data);
+            document.getElementById('manual-fields').style.display = 'none';
+        } else {
+            currentOrderData = null;
+            document.getElementById('order-info-banner').style.display = 'none';
+            document.getElementById('manual-fields').style.display = 'block';
+        }
+    })
+    .catch(function() {
+        currentOrderData = null;
+    });
+}
+
+function showOrderBanner(data) {
+    var banner = document.getElementById('order-info-banner');
+    banner.style.display = 'block';
+    document.getElementById('banner-order-number').textContent = '#' + data.order_number;
+    document.getElementById('banner-customer').textContent = data.customer_name || '-';
+    document.getElementById('banner-po').textContent = data.po_number ? 'PO: ' + data.po_number : '';
+
+    var details = document.getElementById('banner-details');
+    var html = '';
+    if (data.order_type) html += '<span><strong>Type:</strong> ' + data.order_type + '</span>';
+    if (data.total_boxes) html += '<span><strong>Total Boxes:</strong> ' + data.total_boxes + '</span>';
+    if (data.total_groups) html += '<span><strong>Groups:</strong> ' + data.total_groups + '</span>';
+    if (data.in_hands_date) html += '<span><strong>In-Hands:</strong> ' + data.in_hands_date + '</span>';
+    if (data.ship_date) html += '<span><strong>Ship Date:</strong> ' + data.ship_date + '</span>';
+    details.innerHTML = html;
+}
+
+function showOrderProgress(data) {
+    var card = document.getElementById('order-progress-card');
+    var content = document.getElementById('order-progress-content');
+
+    if (!data || !data.groups || !data.groups.length) {
+        card.style.display = 'none';
+        return;
+    }
+    card.style.display = 'block';
+
+    // Build a set of scanned boxes
+    var scannedSet = {};
+    (data.boxes_scanned || []).forEach(function(b) {
+        scannedSet[b.group + '-' + b.box] = true;
+    });
+
+    var totalScanned = data.boxes_scanned ? data.boxes_scanned.length : 0;
+    var totalBoxes = data.total_boxes || '?';
+    var html = '<p style="font-size:14px;color:var(--gray-600);margin-bottom:4px;">Order <strong>#' + data.order_number + '</strong> &mdash; ' + totalScanned + ' / ' + totalBoxes + ' boxes scanned</p>';
+
+    // Progress bar
+    if (data.total_boxes) {
+        var pct = Math.min(100, Math.round((totalScanned / data.total_boxes) * 100));
+        html += '<div class="progress-bar-container"><div class="progress-bar-fill" style="width:' + pct + '%"></div></div>';
+    }
+
+    html += '<div class="group-grid">';
+    data.groups.forEach(function(grp) {
+        var boxCount = grp.box_count || 0;
+        var scannedInGroup = 0;
+        for (var i = 1; i <= boxCount; i++) {
+            if (scannedSet[grp.group_letter + '-' + i]) scannedInGroup++;
+        }
+        var isComplete = boxCount > 0 && scannedInGroup >= boxCount;
+
+        html += '<div class="group-card' + (isComplete ? ' complete' : '') + '">';
+        html += '<h4><span>Group ' + grp.group_letter + '</span><span class="badge ' + (isComplete ? 'badge-green' : 'badge-orange') + '">' + scannedInGroup + '/' + boxCount + '</span></h4>';
+        if (grp.group_type) html += '<div style="font-size:11px;color:var(--gray-500);margin-bottom:6px;">' + grp.group_type + '</div>';
+
+        html += '<div class="box-grid">';
+        for (var i = 1; i <= boxCount; i++) {
+            var isScanned = scannedSet[grp.group_letter + '-' + i];
+            html += '<div class="box-cell' + (isScanned ? ' scanned' : '') + '">' + i + '</div>';
+        }
+        html += '</div>';
+
+        // Show designs
+        if (grp.designs && grp.designs.length) {
+            html += '<div style="margin-top:8px;font-size:11px;color:var(--gray-500);">';
+            grp.designs.forEach(function(d) {
+                html += '<div>' + d.design_id + ' - ' + d.design_name + '</div>';
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+    });
+    html += '</div>';
+
+    content.innerHTML = html;
+}
+
+// Handle Enter key on barcode input
+barcodeInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') {
+        e.preventDefault();
+        submitScan();
+    }
+});
+
+function submitScan() {
+    var barcode = barcodeInput.value.trim();
+    if (!barcode) {
+        showAlert('error', 'Please scan or type a barcode.');
+        barcodeInput.focus();
+        return;
+    }
+
+    var payload = {
+        barcode: barcode,
+        scanned_by: document.getElementById('scanned-by').value.trim()
+    };
+
+    // Include manual fields if order wasn't recognized
+    if (!currentOrderData) {
+        payload.group_letter = document.getElementById('group-letter').value.trim();
+        payload.box_number = document.getElementById('box-number').value || null;
+        payload.customer_name = document.getElementById('customer-name-input').value.trim();
+        payload.po_number = document.getElementById('po-number').value.trim();
+    }
+
+    fetch('/api/scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+    .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+    .then(function(result) {
+        if (result.ok) {
+            showAlert('success', result.data.message);
+
+            barcodeInput.value = '';
+            barcodeInput.focus();
+            loadRecentScans();
+            loadStats();
+
+            // Update progress if we have order data
+            if (currentOrderData) {
+                currentOrderData.boxes_scanned = result.data.boxes_scanned;
+                showOrderProgress(currentOrderData);
+                // Highlight the just-scanned box
+                setTimeout(function() {
+                    var key = result.data.group_letter + '-' + result.data.box_number;
+                    var cells = document.querySelectorAll('.box-cell.scanned');
+                    cells.forEach(function(cell) {
+                        if (cell.textContent == String(result.data.box_number)) {
+                            cell.classList.add('just-scanned');
+                        }
+                    });
+                }, 50);
+            } else {
+                // Show simple progress for manual scans
+                showSimpleProgress(result.data.order_number, result.data.boxes_scanned);
+            }
+
+            // Reset for next scan
+            lastLookupOrder = null;
+            currentOrderData = null;
+            document.getElementById('order-info-banner').style.display = 'none';
+            document.getElementById('manual-fields').style.display = 'none';
+        } else if (result.status === 409) {
+            showAlert('warning', result.data.message);
+            barcodeInput.select();
+        } else {
+            showAlert('error', result.data.error || 'Scan failed.');
+            barcodeInput.select();
+        }
+    })
+    .catch(function(err) {
+        showAlert('error', 'Network error: ' + err.message);
+    });
+}
+
+function showSimpleProgress(orderNumber, boxesScanned) {
+    var card = document.getElementById('order-progress-card');
+    var content = document.getElementById('order-progress-content');
+    card.style.display = 'block';
+
+    var groups = {};
+    boxesScanned.forEach(function(b) {
+        if (!groups[b.group]) groups[b.group] = [];
+        groups[b.group].push(b.box);
+    });
+
+    var html = '<p style="font-size:14px;color:var(--gray-600);margin-bottom:12px;">Order <strong>#' + orderNumber + '</strong> &mdash; ' + boxesScanned.length + ' box(es) scanned</p>';
+
+    Object.keys(groups).sort().forEach(function(grp) {
+        var boxes = groups[grp].sort(function(a,b){return a-b;});
+        html += '<div style="margin-bottom:8px;">';
+        html += '<span class="badge badge-blue" style="margin-right:8px;">Group ' + grp + '</span>';
+        boxes.forEach(function(b) {
+            html += '<span class="badge badge-green" style="margin-right:4px;">Box ' + b + '</span>';
+        });
+        html += '</div>';
+    });
+
+    content.innerHTML = html;
+}
+
+function loadRecentScans() {
+    var today = new Date().toISOString().split('T')[0];
+    fetch('/api/history?date=' + today)
+    .then(function(r) { return r.json(); })
+    .then(function(orders) {
+        var container = document.getElementById('recent-scans');
+        var countBadge = document.getElementById('recent-count');
+
+        if (!orders.length) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#128230;</div><p>No boxes scanned today. Start scanning!</p></div>';
+            countBadge.textContent = '0';
+            return;
+        }
+
+        var totalBoxes = 0;
+        var html = '';
+        orders.forEach(function(order) {
+            totalBoxes += order.boxes_scanned;
+            var complete = order.total_boxes && order.boxes_scanned >= order.total_boxes;
+            var statusBadge = complete
+                ? '<span class="badge badge-green">Complete</span>'
+                : '<span class="badge badge-orange">' + order.boxes_scanned + (order.total_boxes ? '/' + order.total_boxes : '') + ' boxes</span>';
+
+            html += '<div class="scan-item">';
+            html += '<div class="info">';
+            html += '<span class="box-id">#' + order.order_number + '</span>';
+            html += statusBadge;
+            if (order.customer_name) html += '<span style="color:var(--gray-500);font-size:12px;">' + order.customer_name + '</span>';
+            html += '</div>';
+            html += '<span class="time">' + formatTime(order.last_scan) + '</span>';
+            html += '</div>';
+        });
+
+        container.innerHTML = html;
+        countBadge.textContent = totalBoxes + ' boxes';
+    });
+}
+
+function loadStats() {
+    fetch('/api/stats')
+    .then(function(r) { return r.json(); })
+    .then(function(s) {
+        document.getElementById('stat-today-boxes').textContent = s.today_boxes;
+        document.getElementById('stat-today-orders').textContent = s.today_orders;
+        document.getElementById('stat-total-boxes').textContent = s.total_boxes;
+        document.getElementById('stat-total-orders').textContent = s.total_orders;
+    });
+}
+
+function formatTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts + (ts.indexOf('Z') === -1 ? 'Z' : ''));
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+loadRecentScans();
+loadStats();
+setInterval(function() { loadRecentScans(); loadStats(); }, 30000);
+</script>
+{% endblock %}

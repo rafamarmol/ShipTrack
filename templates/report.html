@@ -1,0 +1,151 @@
+{% set active_page = 'report' %}
+{% extends "base.html" %}
+{% block title %}Daily Report - ShipTrack{% endblock %}
+
+{% block content %}
+<div class="no-print">
+    <h1>Daily Shipping Report</h1>
+    <p class="subtitle">Generate and print end-of-day shipping summaries</p>
+</div>
+
+<div class="card no-print">
+    <div class="form-row">
+        <div class="form-group">
+            <label for="report-date">Report Date</label>
+            <input type="date" id="report-date">
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
+            <button class="btn-primary" onclick="loadReport()">Generate Report</button>
+            <button class="btn-secondary" onclick="window.print()">Print Report</button>
+        </div>
+    </div>
+</div>
+
+<div id="report-content">
+    <div class="empty-state">
+        <div class="icon">&#128203;</div>
+        <p>Select a date and click "Generate Report" to view the shipping summary.</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('report-date').value = new Date().toISOString().split('T')[0];
+
+function loadReport() {
+    var reportDate = document.getElementById('report-date').value;
+    if (!reportDate) return;
+
+    fetch('/api/report?date=' + reportDate)
+    .then(function(r) { return r.json(); })
+    .then(function(report) {
+        var container = document.getElementById('report-content');
+
+        if (!report.orders.length) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#128230;</div><p>No shipments recorded for ' + formatDate(report.date) + '.</p></div>';
+            return;
+        }
+
+        var html = '';
+
+        // Report header
+        html += '<div class="card" style="text-align:center;padding:32px;">';
+        html += '<h1 style="font-size:22px;margin-bottom:4px;">Shipping Report</h1>';
+        html += '<p style="color:var(--gray-500);font-size:16px;margin-bottom:20px;">' + formatDate(report.date) + '</p>';
+        html += '<div class="stats-row" style="max-width:400px;margin:0 auto;">';
+        html += '<div class="stat-card"><div class="number">' + report.total_orders + '</div><div class="label">Orders Shipped</div></div>';
+        html += '<div class="stat-card"><div class="number">' + report.total_boxes + '</div><div class="label">Total Boxes</div></div>';
+        html += '</div>';
+        html += '</div>';
+
+        // Summary table
+        html += '<div class="card">';
+        html += '<h2>Order Summary</h2>';
+        html += '<table>';
+        html += '<thead><tr>';
+        html += '<th>Order #</th><th>Customer</th><th>PO</th><th>Type</th><th>Boxes</th><th>Status</th><th>Time</th>';
+        html += '</tr></thead><tbody>';
+
+        report.orders.forEach(function(o) {
+            var complete = o.total_boxes && o.boxes_scanned >= o.total_boxes;
+            var statusBadge = complete
+                ? '<span class="badge badge-green">Complete</span>'
+                : '<span class="badge badge-orange">' + o.boxes_scanned + '/' + (o.total_boxes || '?') + '</span>';
+
+            html += '<tr>';
+            html += '<td><strong>' + o.order_number + '</strong></td>';
+            html += '<td>' + (o.customer_name || '-') + '</td>';
+            html += '<td>' + (o.po_number || '-') + '</td>';
+            html += '<td>' + (o.order_type || '-') + '</td>';
+            html += '<td>' + o.boxes_scanned + (o.total_boxes ? ' / ' + o.total_boxes : '') + '</td>';
+            html += '<td>' + statusBadge + '</td>';
+            html += '<td>' + formatTime(o.first_scan) + ' - ' + formatTime(o.last_scan) + '</td>';
+            html += '</tr>';
+        });
+
+        html += '</tbody></table></div>';
+
+        // Detailed breakdown per order
+        html += '<div class="card">';
+        html += '<h2>Detailed Breakdown</h2>';
+
+        report.orders.forEach(function(o) {
+            html += '<div style="margin-bottom:24px;padding-bottom:16px;border-bottom:1px solid var(--gray-200);">';
+            html += '<h3 style="font-size:15px;margin-bottom:4px;">Order #' + o.order_number;
+            if (o.customer_name) html += ' &mdash; ' + o.customer_name;
+            html += '</h3>';
+            var meta = [];
+            if (o.po_number) meta.push('PO: ' + o.po_number);
+            if (o.order_type) meta.push(o.order_type);
+            if (o.in_hands_date) meta.push('In-Hands: ' + o.in_hands_date);
+            if (meta.length) html += '<p style="font-size:13px;color:var(--gray-500);margin-bottom:8px;">' + meta.join(' | ') + '</p>';
+
+            // Group scans by group letter
+            var groups = {};
+            o.scans.forEach(function(s) {
+                if (!groups[s.group_letter]) groups[s.group_letter] = { scans: [], total: s.total_boxes_in_group, type: s.group_type };
+                groups[s.group_letter].scans.push(s);
+            });
+
+            Object.keys(groups).sort().forEach(function(grp) {
+                var g = groups[grp];
+                html += '<div style="margin-left:16px;margin-bottom:8px;">';
+                html += '<strong>Group ' + grp + '</strong>';
+                if (g.type) html += ' <span style="color:var(--gray-400);font-size:12px;">(' + g.type + ')</span>';
+                if (g.total) html += ' ' + g.scans.length + '/' + g.total + ' boxes';
+                html += ': ';
+                g.scans.forEach(function(s, i) {
+                    if (i > 0) html += ', ';
+                    html += 'Box ' + s.box_number;
+                    if (s.scanned_by) html += ' <span style="color:var(--gray-400);font-size:12px;">(' + s.scanned_by + ')</span>';
+                });
+                html += '</div>';
+            });
+
+            html += '</div>';
+        });
+
+        html += '</div>';
+
+        html += '<div style="text-align:center;color:var(--gray-400);font-size:12px;padding:16px;">Generated on ' + new Date().toLocaleString() + ' &bull; ShipTrack</div>';
+
+        container.innerHTML = html;
+    });
+}
+
+function formatDate(dateStr) {
+    var parts = dateStr.split('-');
+    var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+    return d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function formatTime(ts) {
+    if (!ts) return '';
+    var d = new Date(ts + (ts.indexOf('Z') === -1 ? 'Z' : ''));
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+loadReport();
+</script>
+{% endblock %}

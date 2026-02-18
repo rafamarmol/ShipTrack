@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Shipping Scanner{% endblock %}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --blue: #2563eb;
+            --blue-dark: #1d4ed8;
+            --green: #16a34a;
+            --red: #dc2626;
+            --orange: #ea580c;
+            --gray-50: #f9fafb;
+            --gray-100: #f3f4f6;
+            --gray-200: #e5e7eb;
+            --gray-300: #d1d5db;
+            --gray-400: #9ca3af;
+            --gray-500: #6b7280;
+            --gray-600: #4b5563;
+            --gray-700: #374151;
+            --gray-800: #1f2937;
+            --gray-900: #111827;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--gray-50);
+            color: var(--gray-800);
+            min-height: 100vh;
+        }
+
+        nav {
+            background: var(--gray-900);
+            color: white;
+            padding: 0 24px;
+            display: flex;
+            align-items: center;
+            height: 56px;
+            gap: 32px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        nav .logo {
+            font-weight: 700;
+            font-size: 18px;
+            letter-spacing: -0.5px;
+        }
+
+        nav a {
+            color: var(--gray-400);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            padding: 16px 4px;
+            border-bottom: 2px solid transparent;
+            transition: color 0.15s, border-color 0.15s;
+        }
+
+        nav a:hover { color: white; }
+        nav a.active { color: white; border-bottom-color: var(--blue); }
+
+        .container {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 24px 16px;
+        }
+
+        h1 { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
+        .subtitle { color: var(--gray-500); font-size: 14px; margin-bottom: 24px; }
+
+        .card {
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 10px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+
+        .card h2 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border: 1px solid var(--gray-200);
+            border-radius: 10px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .stat-card .number {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--blue);
+        }
+
+        .stat-card .label {
+            font-size: 12px;
+            color: var(--gray-500);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-top: 2px;
+        }
+
+        label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--gray-600);
+            margin-bottom: 4px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--gray-300);
+            border-radius: 6px;
+            font-size: 15px;
+            transition: border-color 0.15s;
+            outline: none;
+        }
+
+        input:focus, select:focus {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .form-group { margin-bottom: 12px; }
+
+        button, .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.1s;
+            text-decoration: none;
+        }
+
+        button:active { transform: scale(0.98); }
+
+        .btn-primary { background: var(--blue); color: white; }
+        .btn-primary:hover { background: var(--blue-dark); }
+
+        .btn-danger { background: var(--red); color: white; }
+        .btn-danger:hover { background: #b91c1c; }
+
+        .btn-secondary { background: var(--gray-200); color: var(--gray-700); }
+        .btn-secondary:hover { background: var(--gray-300); }
+
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+        .alert {
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 12px;
+            display: none;
+        }
+
+        .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .alert-error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .alert-warning { background: #fffbeb; color: #92400e; border: 1px solid #fed7aa; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        th {
+            text-align: left;
+            padding: 10px 12px;
+            background: var(--gray-50);
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--gray-500);
+            border-bottom: 1px solid var(--gray-200);
+        }
+
+        td {
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        tr:hover td { background: var(--gray-50); }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .badge-green { background: #dcfce7; color: #166534; }
+        .badge-orange { background: #fff7ed; color: #9a3412; }
+        .badge-blue { background: #dbeafe; color: #1e40af; }
+
+        .scan-input-wrapper {
+            position: relative;
+        }
+
+        #barcode-input {
+            font-size: 20px;
+            padding: 14px 16px;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+
+        .recent-scans {
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .scan-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--gray-100);
+        }
+
+        .scan-item:last-child { border-bottom: none; }
+
+        .scan-item .info { display: flex; align-items: center; gap: 12px; }
+
+        .scan-item .box-id {
+            font-weight: 700;
+            font-size: 15px;
+            font-family: monospace;
+        }
+
+        .scan-item .time {
+            color: var(--gray-400);
+            font-size: 12px;
+        }
+
+        .order-progress {
+            margin-top: 16px;
+        }
+
+        .progress-bar-container {
+            background: var(--gray-200);
+            border-radius: 9999px;
+            height: 8px;
+            overflow: hidden;
+            margin-top: 6px;
+        }
+
+        .progress-bar-fill {
+            background: var(--green);
+            height: 100%;
+            border-radius: 9999px;
+            transition: width 0.3s ease;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--gray-400);
+        }
+
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state p { font-size: 14px; }
+
+        @media print {
+            nav { display: none; }
+            .no-print { display: none !important; }
+            body { background: white; }
+            .card { border: 1px solid #ddd; box-shadow: none; break-inside: avoid; }
+        }
+
+        @media (max-width: 640px) {
+            .form-row { grid-template-columns: 1fr; }
+            .stats-row { grid-template-columns: repeat(2, 1fr); }
+            nav { gap: 16px; padding: 0 12px; }
+            nav a { font-size: 13px; }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <span class="logo">ShipTrack</span>
+        <a href="/" {% if active_page == 'scan' %}class="active"{% endif %}>Scan</a>
+        <a href="/history" {% if active_page == 'history' %}class="active"{% endif %}>History</a>
+        <a href="/report" {% if active_page == 'report' %}class="active"{% endif %}>Reports</a>
+    </nav>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
