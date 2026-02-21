@@ -17,6 +17,7 @@
         <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
             <button class="btn-primary" onclick="loadReport()">Generate Report</button>
             <button class="btn-secondary" onclick="window.print()">Print Report</button>
+            <button class="btn-secondary" id="export-csv-btn" onclick="exportCSV()" style="display:none;">Export CSV</button>
         </div>
     </div>
 </div>
@@ -33,6 +34,31 @@
 <script>
 document.getElementById('report-date').value = new Date().toISOString().split('T')[0];
 
+var lastReport = null;
+
+function exportCSV() {
+    if (!lastReport || !lastReport.orders.length) return;
+
+    var rows = [['Order Number', 'Status']];
+    lastReport.orders.forEach(function(o) {
+        var status = (o.total_boxes && o.boxes_scanned >= o.total_boxes) ? 'Scanned' : 'Partial Scan';
+        rows.push([o.order_number, status]);
+    });
+
+    var csv = rows.map(function(row) {
+        return row.map(function(cell) {
+            return '"' + String(cell).replace(/"/g, '""') + '"';
+        }).join(',');
+    }).join('\n');
+
+    var blob = new Blob([csv], { type: 'text/csv' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'shiptrack-report-' + lastReport.date + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+
 function loadReport() {
     var reportDate = document.getElementById('report-date').value;
     if (!reportDate) return;
@@ -41,11 +67,15 @@ function loadReport() {
     .then(function(r) { return r.json(); })
     .then(function(report) {
         var container = document.getElementById('report-content');
+        lastReport = report;
 
         if (!report.orders.length) {
+            document.getElementById('export-csv-btn').style.display = 'none';
             container.innerHTML = '<div class="empty-state"><div class="icon">&#128230;</div><p>No shipments recorded for ' + formatDate(report.date) + '.</p></div>';
             return;
         }
+
+        document.getElementById('export-csv-btn').style.display = '';
 
         var html = '';
 
