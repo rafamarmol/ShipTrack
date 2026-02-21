@@ -31,8 +31,8 @@
             <input type="date" id="export-to">
         </div>
         <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
-            <button class="btn-secondary" onclick="exportCSV()">Export Range CSV</button>
-            <a href="/api/export/scans" class="btn-secondary" style="text-decoration:none;text-align:center;">Export All CSV</a>
+            <button class="btn-secondary" onclick="exportRange()">Export Range</button>
+            <a href="/api/export/scans" class="btn-secondary" style="text-decoration:none;text-align:center;">Export All</a>
         </div>
     </div>
 </div>
@@ -81,14 +81,14 @@
 
 {% block scripts %}
 <script>
-function exportCSV() {
+function exportRange() {
     var from = document.getElementById('export-from').value;
     var to = document.getElementById('export-to').value;
     var params = [];
     if (from) params.push('from=' + from);
     if (to) params.push('to=' + to);
     if (!params.length) {
-        alert('Please select at least a From or To date, or use "Export All CSV" for all time.');
+        alert('Please select at least a From or To date, or use "Export All" for all time.');
         return;
     }
     window.location.href = '/api/export/scans?' + params.join('&');

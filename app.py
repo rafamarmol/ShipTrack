@@ -828,15 +828,32 @@ def get_stats():
 # ─── API: CSV Export (all scans) ─────────────────────────────────────────────
 
 @app.route('/api/export/scans')
-def export_scans_csv():
-    """Export scans as a 2-column CSV: Order Number, Status.
-    Optional query params: from (start date), to (end date).
-    If neither is provided, exports all time."""
+def export_scans():
+    """Export scans as an Excel file with two sheets:
+    Sheet 1 (Order Summary): one row per order with all order data + status.
+    Sheet 2 (Box Details): one row per scanned box with order, group, box info.
+    Optional query params: from (start date), to (end date)."""
+    import io
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+
     db = get_db()
     date_from = request.args.get('from', '')
     date_to = request.args.get('to', '')
 
-    query = """
+    # Build date filter conditions
+    conditions = []
+    params = []
+    if date_from:
+        conditions.append("DATE(s.scanned_at) >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("DATE(s.scanned_at) <= ?")
+        params.append(date_to)
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    # ── Sheet 1 data: Order Summary ──
+    order_query = """
         SELECT o.order_number, o.customer_name, o.po_number,
                o.ship_date, o.in_hands_date, o.order_type,
                o.total_groups, o.total_boxes,
@@ -845,36 +862,49 @@ def export_scans_csv():
                MAX(s.scanned_at) as last_scan
         FROM orders o
         LEFT JOIN scans s ON o.order_number = s.order_number
-    """
-    conditions = []
-    params = []
-
-    if date_from:
-        conditions.append("DATE(s.scanned_at) >= ?")
-        params.append(date_from)
-    if date_to:
-        conditions.append("DATE(s.scanned_at) <= ?")
-        params.append(date_to)
-
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-
-    query += """
+    """ + where_clause + """
         GROUP BY o.order_number, o.customer_name, o.po_number,
                  o.ship_date, o.in_hands_date, o.order_type,
                  o.total_groups, o.total_boxes
         HAVING COUNT(s.id) > 0
         ORDER BY MAX(s.scanned_at) DESC
     """
+    orders = fetch_all(db, order_query, params)
 
-    rows = fetch_all(db, query, params)
+    # ── Sheet 2 data: Box Details ──
+    box_query = """
+        SELECT s.order_number, o.customer_name, o.po_number,
+               s.group_letter, g.group_type, s.box_number,
+               g.box_count as group_total_boxes,
+               s.scanned_by, s.scanned_at
+        FROM scans s
+        JOIN orders o ON o.order_number = s.order_number
+        LEFT JOIN order_groups g ON g.order_number = s.order_number AND g.group_letter = s.group_letter
+    """ + where_clause + """
+        ORDER BY s.order_number, s.group_letter, s.box_number
+    """
+    boxes = fetch_all(db, box_query, params)
 
-    import io
-    output = io.StringIO()
-    output.write('Order Number,Customer,PO Number,Order Type,Boxes Scanned,Total Boxes,Status,Ship Date,In-Hands Date,First Scan,Last Scan\n')
-    for r in rows:
+    # ── Build workbook ──
+    wb = Workbook()
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+
+    # Sheet 1: Order Summary
+    ws1 = wb.active
+    ws1.title = "Order Summary"
+    summary_headers = ['Order Number', 'Customer', 'PO Number', 'Order Type',
+                       'Boxes Scanned', 'Total Boxes', 'Status',
+                       'Ship Date', 'In-Hands Date', 'First Scan', 'Last Scan']
+    ws1.append(summary_headers)
+    for cell in ws1[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for r in orders:
         status = 'Scanned' if (r['total_boxes'] and r['boxes_scanned'] >= r['total_boxes']) else 'Partial Scan'
-        output.write('"{}","{}","{}","{}",{},{},"{}", "{}","{}","{}","{}"\n'.format(
+        ws1.append([
             r['order_number'],
             r['customer_name'] or '',
             r['po_number'] or '',
@@ -884,24 +914,62 @@ def export_scans_csv():
             status,
             r['ship_date'] or '',
             r['in_hands_date'] or '',
-            r['first_scan'] or '',
-            r['last_scan'] or ''
-        ))
+            str(r['first_scan']) if r['first_scan'] else '',
+            str(r['last_scan']) if r['last_scan'] else ''
+        ])
+
+    # Auto-size columns
+    for col in ws1.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        ws1.column_dimensions[col[0].column_letter].width = min(max_len + 3, 30)
+
+    # Sheet 2: Box Details
+    ws2 = wb.create_sheet("Box Details")
+    box_headers = ['Order Number', 'Customer', 'PO Number',
+                   'Group', 'Group Type', 'Box Number', 'Group Total Boxes',
+                   'Scanned By', 'Scanned At']
+    ws2.append(box_headers)
+    for cell in ws2[1]:
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
+
+    for b in boxes:
+        ws2.append([
+            b['order_number'],
+            b['customer_name'] or '',
+            b['po_number'] or '',
+            b['group_letter'],
+            b['group_type'] or '',
+            b['box_number'],
+            b['group_total_boxes'] if b['group_total_boxes'] else '',
+            b['scanned_by'] or '',
+            str(b['scanned_at']) if b['scanned_at'] else ''
+        ])
+
+    for col in ws2.columns:
+        max_len = max(len(str(cell.value or '')) for cell in col)
+        ws2.column_dimensions[col[0].column_letter].width = min(max_len + 3, 30)
+
+    # ── Save to bytes and return ──
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
 
     # Build filename
     if date_from and date_to:
-        fname = 'shiptrack-scans-{}-to-{}.csv'.format(date_from, date_to)
+        fname = 'shiptrack-export-{}-to-{}.xlsx'.format(date_from, date_to)
     elif date_from:
-        fname = 'shiptrack-scans-from-{}.csv'.format(date_from)
+        fname = 'shiptrack-export-from-{}.xlsx'.format(date_from)
     elif date_to:
-        fname = 'shiptrack-scans-through-{}.csv'.format(date_to)
+        fname = 'shiptrack-export-through-{}.xlsx'.format(date_to)
     else:
-        fname = 'shiptrack-all-scans.csv'
+        fname = 'shiptrack-export-all.xlsx'
 
     from flask import Response
     return Response(
         output.getvalue(),
-        mimetype='text/csv',
+        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         headers={'Content-Disposition': 'attachment; filename=' + fname}
     )
 
