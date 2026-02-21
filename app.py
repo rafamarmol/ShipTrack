@@ -837,7 +837,12 @@ def export_scans_csv():
     date_to = request.args.get('to', '')
 
     query = """
-        SELECT o.order_number, o.total_boxes, COUNT(s.id) as boxes_scanned
+        SELECT o.order_number, o.customer_name, o.po_number,
+               o.ship_date, o.in_hands_date, o.order_type,
+               o.total_groups, o.total_boxes,
+               COUNT(s.id) as boxes_scanned,
+               MIN(s.scanned_at) as first_scan,
+               MAX(s.scanned_at) as last_scan
         FROM orders o
         LEFT JOIN scans s ON o.order_number = s.order_number
     """
@@ -855,7 +860,9 @@ def export_scans_csv():
         query += " WHERE " + " AND ".join(conditions)
 
     query += """
-        GROUP BY o.order_number, o.total_boxes
+        GROUP BY o.order_number, o.customer_name, o.po_number,
+                 o.ship_date, o.in_hands_date, o.order_type,
+                 o.total_groups, o.total_boxes
         HAVING COUNT(s.id) > 0
         ORDER BY MAX(s.scanned_at) DESC
     """
@@ -864,10 +871,22 @@ def export_scans_csv():
 
     import io
     output = io.StringIO()
-    output.write('Order Number,Status\n')
+    output.write('Order Number,Customer,PO Number,Order Type,Boxes Scanned,Total Boxes,Status,Ship Date,In-Hands Date,First Scan,Last Scan\n')
     for r in rows:
         status = 'Scanned' if (r['total_boxes'] and r['boxes_scanned'] >= r['total_boxes']) else 'Partial Scan'
-        output.write('"{}","{}"\n'.format(r['order_number'], status))
+        output.write('"{}","{}","{}","{}",{},{},"{}", "{}","{}","{}","{}"\n'.format(
+            r['order_number'],
+            r['customer_name'] or '',
+            r['po_number'] or '',
+            r['order_type'] or '',
+            r['boxes_scanned'],
+            r['total_boxes'] if r['total_boxes'] else '',
+            status,
+            r['ship_date'] or '',
+            r['in_hands_date'] or '',
+            r['first_scan'] or '',
+            r['last_scan'] or ''
+        ))
 
     # Build filename
     if date_from and date_to:
