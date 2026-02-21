@@ -825,6 +825,37 @@ def get_stats():
     })
 
 
+# ─── API: CSV Export (all scans) ─────────────────────────────────────────────
+
+@app.route('/api/export/scans')
+def export_scans_csv():
+    """Export all scans as a 2-column CSV: Order Number, Status."""
+    db = get_db()
+
+    rows = fetch_all(db, """
+        SELECT o.order_number, o.total_boxes, COUNT(s.id) as boxes_scanned
+        FROM orders o
+        LEFT JOIN scans s ON o.order_number = s.order_number
+        GROUP BY o.order_number, o.total_boxes
+        HAVING COUNT(s.id) > 0
+        ORDER BY MAX(s.scanned_at) DESC
+    """)
+
+    import io
+    output = io.StringIO()
+    output.write('Order Number,Status\n')
+    for r in rows:
+        status = 'Scanned' if (r['total_boxes'] and r['boxes_scanned'] >= r['total_boxes']) else 'Partial Scan'
+        output.write('"{}","{}"\n'.format(r['order_number'], status))
+
+    from flask import Response
+    return Response(
+        output.getvalue(),
+        mimetype='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=shiptrack-all-scans.csv'}
+    )
+
+
 if __name__ == '__main__':
     migrate_db()
     init_db()
