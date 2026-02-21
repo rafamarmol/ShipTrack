@@ -19,6 +19,19 @@
         <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
             <button class="btn-primary" onclick="loadHistory()">Filter</button>
             <button class="btn-secondary" onclick="clearFilters()">Clear</button>
+        </div>
+    </div>
+    <div class="form-row" style="margin-top:12px;">
+        <div class="form-group">
+            <label for="export-from">Export From</label>
+            <input type="date" id="export-from">
+        </div>
+        <div class="form-group">
+            <label for="export-to">Export To</label>
+            <input type="date" id="export-to">
+        </div>
+        <div class="form-group" style="display:flex;align-items:flex-end;gap:8px;">
+            <button class="btn-secondary" onclick="exportCSV()">Export Range CSV</button>
             <a href="/api/export/scans" class="btn-secondary" style="text-decoration:none;text-align:center;">Export All CSV</a>
         </div>
     </div>
@@ -68,6 +81,19 @@
 
 {% block scripts %}
 <script>
+function exportCSV() {
+    var from = document.getElementById('export-from').value;
+    var to = document.getElementById('export-to').value;
+    var params = [];
+    if (from) params.push('from=' + from);
+    if (to) params.push('to=' + to);
+    if (!params.length) {
+        alert('Please select at least a From or To date, or use "Export All CSV" for all time.');
+        return;
+    }
+    window.location.href = '/api/export/scans?' + params.join('&');
+}
+
 function loadHistory() {
     var dateVal = document.getElementById('filter-date').value;
     var search = document.getElementById('filter-search').value.trim();

@@ -829,17 +829,38 @@ def get_stats():
 
 @app.route('/api/export/scans')
 def export_scans_csv():
-    """Export all scans as a 2-column CSV: Order Number, Status."""
+    """Export scans as a 2-column CSV: Order Number, Status.
+    Optional query params: from (start date), to (end date).
+    If neither is provided, exports all time."""
     db = get_db()
+    date_from = request.args.get('from', '')
+    date_to = request.args.get('to', '')
 
-    rows = fetch_all(db, """
+    query = """
         SELECT o.order_number, o.total_boxes, COUNT(s.id) as boxes_scanned
         FROM orders o
         LEFT JOIN scans s ON o.order_number = s.order_number
+    """
+    conditions = []
+    params = []
+
+    if date_from:
+        conditions.append("DATE(s.scanned_at) >= ?")
+        params.append(date_from)
+    if date_to:
+        conditions.append("DATE(s.scanned_at) <= ?")
+        params.append(date_to)
+
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+
+    query += """
         GROUP BY o.order_number, o.total_boxes
         HAVING COUNT(s.id) > 0
         ORDER BY MAX(s.scanned_at) DESC
-    """)
+    """
+
+    rows = fetch_all(db, query, params)
 
     import io
     output = io.StringIO()
@@ -848,11 +869,21 @@ def export_scans_csv():
         status = 'Scanned' if (r['total_boxes'] and r['boxes_scanned'] >= r['total_boxes']) else 'Partial Scan'
         output.write('"{}","{}"\n'.format(r['order_number'], status))
 
+    # Build filename
+    if date_from and date_to:
+        fname = 'shiptrack-scans-{}-to-{}.csv'.format(date_from, date_to)
+    elif date_from:
+        fname = 'shiptrack-scans-from-{}.csv'.format(date_from)
+    elif date_to:
+        fname = 'shiptrack-scans-through-{}.csv'.format(date_to)
+    else:
+        fname = 'shiptrack-all-scans.csv'
+
     from flask import Response
     return Response(
         output.getvalue(),
         mimetype='text/csv',
-        headers={'Content-Disposition': 'attachment; filename=shiptrack-all-scans.csv'}
+        headers={'Content-Disposition': 'attachment; filename=' + fname}
     )
 
 
